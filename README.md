@@ -8,13 +8,12 @@ Script en ligne de commande pour saisir les informations d'un client, les stocke
 - Accès réseau à la base MariaDB :
   - Hôte : `mariadb-std-7fbcfa043f21.apps.kappsul.su.univ-lorraine.fr`
   - Port : `3306`
-  - Utilisateur : `root`
-  - Mot de passe par défaut : `3edDCAo0Ll` (surchargable via les variables d'environnement ci-dessous)
+  - Utilisateur : `root` (ou un utilisateur disposant des droits nécessaires)
 
 ## Installation
 
 ```bash
-cd /home/runner/work/interfaceclient/interfaceclient
+# depuis la racine du dépôt
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -27,8 +26,10 @@ Les paramètres de connexion peuvent être modifiés par variables d'environneme
 - `DB_HOST` (par défaut `mariadb-std-7fbcfa043f21.apps.kappsul.su.univ-lorraine.fr`)
 - `DB_PORT` (par défaut `3306`)
 - `DB_USER` (par défaut `root`)
-- `DB_PASSWORD` (par défaut `3edDCAo0Ll`)
+- `DB_PASSWORD` (**obligatoire, pas de valeur par défaut**)
 - `DB_NAME` (par défaut `interfaceclient`)
+
+> Assurez-vous que la base `DB_NAME` existe avant d'exécuter le script. Le script crée uniquement la table `client_orders` si elle est absente.
 
 ## Utilisation
 
@@ -52,6 +53,6 @@ python app.py \
 
 Le script :
 
-1. crée la base et la table `client_orders` si elles n'existent pas ;
+1. suppose que la base `DB_NAME` existe déjà et crée la table `client_orders` si nécessaire ;
 2. enregistre le client et la quantité de moteurs demandée ;
 3. transmet la demande au module stock (placeholder pour l'intégration future).

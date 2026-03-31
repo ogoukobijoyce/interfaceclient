@@ -1,8 +1,9 @@
 import argparse
 import os
+import re
 import sys
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import mysql.connector
 from mysql.connector import errorcode
@@ -14,9 +15,11 @@ DEFAULT_DB_CONFIG = {
     ),
     "port": int(os.environ.get("DB_PORT", "3306")),
     "user": os.environ.get("DB_USER", "root"),
-    "password": os.environ.get("DB_PASSWORD", "3edDCAo0Ll"),
+    "password": os.environ.get("DB_PASSWORD"),
     "database": os.environ.get("DB_NAME", "interfaceclient"),
 }
+
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s.]+$")
 
 
 @dataclass
@@ -34,18 +37,23 @@ def get_connection(config: Optional[Dict[str, Any]] = None) -> mysql.connector.M
     cfg = dict(config or DEFAULT_DB_CONFIG)
     db_name = cfg.pop("database", None)
 
+    if not cfg.get("password"):
+        raise ValueError(
+            "Le mot de passe MariaDB n'est pas renseigné. "
+            "Définissez la variable d'environnement DB_PASSWORD."
+        )
+
+    if db_name and not re.fullmatch(r"[A-Za-z0-9_]+", db_name):
+        raise ValueError("Le nom de base de données contient des caractères non autorisés.")
+
     try:
         return mysql.connector.connect(database=db_name, **cfg)
     except mysql.connector.Error as exc:
         if exc.errno == errorcode.ER_BAD_DB_ERROR and db_name:
-            bootstrap_conn = mysql.connector.connect(**cfg)
-            bootstrap_cursor = bootstrap_conn.cursor()
-            bootstrap_cursor.execute(
-                f"CREATE DATABASE IF NOT EXISTS `{db_name}` DEFAULT CHARACTER SET utf8mb4"
-            )
-            bootstrap_cursor.close()
-            bootstrap_conn.close()
-            return mysql.connector.connect(database=db_name, **cfg)
+            raise ValueError(
+                "La base de données indiquée est introuvable. "
+                "Merci de la créer avant d'exécuter le script."
+            ) from exc
         raise
 
 
@@ -70,7 +78,21 @@ def ensure_tables(connection: mysql.connector.MySQLConnection) -> None:
 
 
 def validate_email(email: str) -> bool:
-    return "@" in email and "." in email.split("@")[-1]
+    return bool(EMAIL_PATTERN.match(email or ""))
+
+
+def prompt_for_engine_count(initial_value: Optional[int]) -> int:
+    engines_requested = initial_value
+    while True:
+        if engines_requested is None:
+            try:
+                engines_requested = int(input("Nombre de moteurs à fabriquer: ").strip())
+            except ValueError:
+                engines_requested = None
+        if engines_requested is not None and engines_requested > 0:
+            return engines_requested
+        print("Merci de saisir un nombre entier positif.")
+        engines_requested = None
 
 
 def prompt_for_order(args: argparse.Namespace) -> ClientOrder:
@@ -86,20 +108,14 @@ def prompt_for_order(args: argparse.Namespace) -> ClientOrder:
     first_name = ask("Prénom: ", args.first_name)
     role = ask("Fonction: ", args.role)
     company = ask("Entreprise: ", args.company)
-    email = ask("Adresse mail: ", args.email)
+    email_fallback: Optional[str] = args.email
+    email = ask("Adresse mail: ", email_fallback)
     while not validate_email(email):
         print("Adresse mail invalide, merci de réessayer.")
-        email = ask("Adresse mail: ")
+        email_fallback = None
+        email = ask("Adresse mail: ", email_fallback)
 
-    engines_requested = args.engines
-    while engines_requested is None:
-        try:
-            engines_requested = int(input("Nombre de moteurs à fabriquer: ").strip())
-            if engines_requested < 1:
-                raise ValueError
-        except ValueError:
-            print("Merci de saisir un nombre entier positif.")
-            engines_requested = None
+    engines_requested = prompt_for_engine_count(args.engines)
 
     return ClientOrder(
         last_name=last_name,
@@ -136,12 +152,14 @@ def store_order(connection: mysql.connector.MySQLConnection, order: ClientOrder)
 
 def send_to_stock_module(order: ClientOrder) -> None:
     # Placeholder for future integration with stock validation system.
+    engine_label = "moteur" if order.engines_requested == 1 else "moteurs"
     print(
-        f"[Info] Demande envoyée au module de stock: {order.engines_requested} moteur(s) pour {order.company}."
+        f"[Info] Demande envoyée au module de stock: "
+        f"{order.engines_requested} {engine_label} pour {order.company}."
     )
 
 
-def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Enregistrer les informations client et la demande de fabrication."
     )
@@ -158,7 +176,7 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
     try:
         connection = get_connection()
